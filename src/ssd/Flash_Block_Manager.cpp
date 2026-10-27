@@ -164,6 +164,7 @@ namespace SSD_Components
 		plane_record->Invalid_pages_count -= reclaimed_pages;
 
 		block->Erase();
+		Invalidate_wear_snapshot(); // Before retirement/EOL observers.
 		if (Retire_block_if_worn_out(block, block_address)) {
 			const unsigned int retired_free_pages = reclaimed_pages + unwritten_pages;
 			if (plane_record->Free_pages_count < retired_free_pages) {

@@ -1,4 +1,5 @@
 #include "Device_Parameter_Set.h"
+#include "SWANS_Parameter_Set.h"
 #include <algorithm>
 Device_Parameter_Set::Device_Parameter_Set()
 	: Seed(123),
@@ -50,6 +51,7 @@ Device_Parameter_Set::Device_Parameter_Set()
 	  SWANS_Epoch_Default(40000000000ULL),
 	  SWANS_Epoch_Placement(40000000000ULL),
 	  SWANS_Epoch_Migration(40000000000ULL),
+	  SWANS_Wear_Metric("WRITE_BYTES"),
 	  SWANS_TH_Precautionary(5.0),
 	  SWANS_TH_Critical(15.0),
 	  SWANS_Balance_Unit_Bytes(1024ULL * 1024ULL),
@@ -433,6 +435,19 @@ void Device_Parameter_Set::XML_serialize(Utils::XmlWriter& xmlwriter)
 	xmlwriter.Write_attribute_string(attr, val);
 
 	attr = "SWANS_TH_Precautionary";
+	xmlwriter.Write_attribute_string("SWANS_Wear_Metric", SWANS_Wear_Metric);
+	xmlwriter.Write_attribute_string("SWANS_Migration_Trigger", SWANS_Migration_Trigger);
+	xmlwriter.Write_attribute_string("SWANS_Zone_Selection", SWANS_Zone_Selection);
+	xmlwriter.Write_attribute_string("SWANS_TEC_TH_Precautionary_PctPoint", std::to_string(SWANS_TEC_TH_Precautionary_PctPoint));
+	xmlwriter.Write_attribute_string("SWANS_TEC_TH_Critical_PctPoint", std::to_string(SWANS_TEC_TH_Critical_PctPoint));
+
+	xmlwriter.Write_attribute_string("SWANS_Zone_Popularity_Mode", SWANS_Zone_Popularity_Mode);
+	xmlwriter.Write_attribute_string("SWANS_Zone_Popularity_Period", std::to_string(SWANS_Zone_Popularity_Period));
+	xmlwriter.Write_attribute_string("SWANS_Reserve_Zone_Enabled", SWANS_Reserve_Zone_Enabled ? "true" : "false");
+	xmlwriter.Write_attribute_string("SWANS_Migration_Slice_Time", std::to_string(SWANS_Migration_Slice_Time));
+	xmlwriter.Write_attribute_string("SWANS_Migration_Slice_Sectors", std::to_string(SWANS_Migration_Slice_Sectors));
+	xmlwriter.Write_attribute_string("SWANS_Migration_Pause_Duration", std::to_string(SWANS_Migration_Pause_Duration));
+	xmlwriter.Write_attribute_string("SWANS_Migration_Pause_On_Read", SWANS_Migration_Pause_On_Read ? "true" : "false");
 	val = std::to_string(SWANS_TH_Precautionary);
 	xmlwriter.Write_attribute_string(attr, val);
 
@@ -738,6 +753,12 @@ void Device_Parameter_Set::XML_deserialize(rapidxml::xml_node<> *node)
 			} else if (strcmp(param->name(), "Stripe_Unit_LBA") == 0) {
 				std::string val = param->value();
 				Stripe_Unit_LBA = std::stoul(val);
+			} else if (std::string(param->name()) == "SWANS_Reserve_Zone_Enabled"
+				|| std::string(param->name()) == "SWANS_Migration_Slice_Time"
+				|| std::string(param->name()) == "SWANS_Migration_Slice_Sectors"
+				|| std::string(param->name()) == "SWANS_Migration_Pause_Duration"
+				|| std::string(param->name()) == "SWANS_Migration_Pause_On_Read") {
+				Set_swans_parameter(param->name(), param->value(), *this);
 			} else if (strcmp(param->name(), "SWANS_Enabled") == 0) {
 				std::string val = param->value();
 				std::transform(val.begin(), val.end(), val.begin(), ::toupper);
@@ -764,6 +785,20 @@ void Device_Parameter_Set::XML_deserialize(rapidxml::xml_node<> *node)
 			} else if (strcmp(param->name(), "SWANS_Epoch_Migration") == 0) {
 				std::string val = param->value();
 				SWANS_Epoch_Migration = std::stoull(val);
+			} else if (strcmp(param->name(), "SWANS_Migration_Trigger") == 0) {
+				SWANS_Migration_Trigger = param->value();
+			} else if (strcmp(param->name(), "SWANS_Zone_Selection") == 0) {
+				SWANS_Zone_Selection = param->value();
+			} else if (strcmp(param->name(), "SWANS_TEC_TH_Precautionary_PctPoint") == 0) {
+				SWANS_TEC_TH_Precautionary_PctPoint = std::stod(param->value());
+			} else if (strcmp(param->name(), "SWANS_TEC_TH_Critical_PctPoint") == 0) {
+				SWANS_TEC_TH_Critical_PctPoint = std::stod(param->value());
+			} else if (strcmp(param->name(), "SWANS_Wear_Metric") == 0) {
+				SWANS_Wear_Metric = param->value();
+			} else if (strcmp(param->name(), "SWANS_Zone_Popularity_Mode") == 0) {
+				SWANS_Zone_Popularity_Mode = param->value();
+			} else if (strcmp(param->name(), "SWANS_Zone_Popularity_Period") == 0) {
+				SWANS_Zone_Popularity_Period = std::stoull(param->value());
 			} else if (strcmp(param->name(), "SWANS_TH_Precautionary") == 0) {
 				std::string val = param->value();
 				SWANS_TH_Precautionary = std::stod(val);
