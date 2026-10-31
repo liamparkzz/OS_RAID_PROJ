@@ -25,7 +25,7 @@ def invoke(folder, extra=None, expected=None):
     return ET.parse(folder / "workload_scenario_1.xml").getroot()
 
 
-def prepare(name, precondition=False, limits=False):
+def prepare(name, precondition=False, limits=False, metric="BAD_BLOCK_COUNT"):
     folder = OUT / name
     folder.mkdir(exist_ok=True)
     ssd = ET.parse(ROOT / "ssdconfig.xml")
@@ -45,10 +45,15 @@ def prepare(name, precondition=False, limits=False):
     ssd.write(folder / "ssd.xml")
     swans = ET.Element("SWANS_Parameter_Set")
     for key, value in {
-        "SWANS_Enabled": "true", "SWANS_Reserve_Zone_Enabled": "true",
+        "SWANS_Enabled": "true", "op_zone_migration": "true",
+        "SWANS_Wear_Metric": metric,
+        "SWANS_Migration_Trigger": "IMBALANCE" if metric == "WRITE_BYTES" else "DYNAMIC_WEAR",
+        "SWANS_TH_Critical": 32, "SWANS_Balance_Unit_Bytes": 4096,
+        "SWANS_TEC_TH_Precautionary_PctPoint": 40,
+        "SWANS_TEC_TH_Critical_PctPoint": 45,
         "SWANS_Epoch_Default": 1000000, "SWANS_Epoch_Placement": 1000000,
         "SWANS_Epoch_Migration": 1000000, "SWANS_TH_Precautionary": "1e12",
-        "SWANS_Zone_Popularity_Period": 100000000, "SWANS_Zone_Popularity_Mode": "LAST_EPOCH",
+        "SWANS_Zone_Popularity_Period": 100000000, "SWANS_Zone_Popularity_Mode": "HALF_DECAY",
         "SWANS_Migration_Slice_Sectors": 64 if limits else 0,
         "SWANS_Migration_Slice_Time": 1000000 if limits else 0,
         "SWANS_Migration_Pause_Duration": 100000,
@@ -86,23 +91,26 @@ def prepare(name, precondition=False, limits=False):
     return folder
 
 
-def verify(name, precondition=False, limits=False):
-    folder = prepare(name, precondition, limits)
+def verify(name, precondition=False, limits=False, metric="BAD_BLOCK_COUNT"):
+    folder = prepare(name, precondition, limits, metric)
     root = invoke(folder)
     def value(key):
         return next(e.text for e in root.iter(key))
     assert value("SWANS_User_Zone_Count") == "352"
     assert value("SWANS_Reserve_Zone_Count") == "4"
     assert value("SWANS_Mapping_Duplicate_Physical_Locations") == "0"
-    assert value("SWANS_Zone_Popularity_Mode") == "LAST_EPOCH"
+    assert value("SWANS_Zone_Popularity_Mode") == "HALF_DECAY"
+    assert value("SWANS_Zone_Popularity_Period") == "0"
+    assert value("SWANS_Zone_Popularity_Update") == "LIVE_WRITES_HALF_ALL_ZONES_PER_COMPLETED_MIGRATION"
     records = [e for e in root.iter() if e.tag.startswith("SWANS_Migration_Record_")]
     assert records, (folder, "No migration")
-    assert all(e.findtext("Mode") == "RESERVE_EXCHANGE" for e in records)
+    assert all(e.findtext("Mode") == "op_zone_migration" for e in records)
     completed = [e for e in records if e.findtext("Status") == "COMPLETED"]
     assert completed, (folder, "No completed exchange")
     for e in records:
         assert int(e.findtext("Cold_Copy_Sectors")) > 0
-        assert float(e.findtext("Source_Wear")) > float(e.findtext("Wear_Threshold"))
+        if metric != "WRITE_BYTES":
+            assert float(e.findtext("Source_Wear")) > float(e.findtext("Wear_Threshold"))
     assert int(value("SWANS_Exchange_Cold_Stages_Completed")) >= len(completed)
     if limits:
         assert int(value("SWANS_Migration_Time_Pauses")) + int(value("SWANS_Migration_Sector_Pauses")) > 0
@@ -111,6 +119,57 @@ def verify(name, precondition=False, limits=False):
 
 verify("full-device")
 verify("sliced", limits=True)
+verify("tec-exchange", metric="TEC")
+verify("write-exchange", metric="WRITE_BYTES")
+folder = prepare("legacy-reserve-option")
+legacy = (folder / "swans.xml").read_text().replace("op_zone_migration", "SWANS_Reserve_Zone_Enabled")
+(folder / "swans.xml").write_text(legacy)
+root = invoke(folder)
+assert next(root.iter("SWANS_Reserve_Zone_Count")).text == "4"
+assert any(e.findtext("Mode") == "op_zone_migration" for e in root.iter()
+           if e.tag.startswith("SWANS_Migration_Record_"))
+# The same option is accepted in the SSD XML, without a separate -s file.
+folder = prepare("inline-op-option")
+ssd = ET.parse(folder / "ssd.xml")
+device = ssd.find(".//Device_Parameter_Set")
+for node in ET.parse(folder / "swans.xml").getroot():
+    existing = device.find(node.tag)
+    if existing is not None:
+        existing.text = node.text
+    else:
+        device.append(copy.deepcopy(node))
+ssd.write(folder / "ssd.xml")
+root = invoke(folder, [])
+assert next(root.iter("SWANS_Reserve_Zone_Count")).text == "4"
+assert any(e.findtext("Mode") == "op_zone_migration" for e in root.iter()
+           if e.tag.startswith("SWANS_Migration_Record_"))
+print("op_zone_migration: named option, legacy alias and inline SSD XML passed")
+# Preserve matching legacy aliases, but never let XML ordering choose capacity.
+inline_xml = (folder / "ssd.xml").read_bytes()
+for i, (pairs, count) in enumerate([
+    ([("op_zone_migration", "true"), ("SWANS_Reserve_Zone_Enabled", "false")], None),
+    ([("SWANS_Reserve_Zone_Enabled", "false"), ("op_zone_migration", "true")], None),
+    ([("op_zone_migration", "true"), ("op_zone_migration", "false")], None),
+    ([("op_zone_migration", "false"), ("op_zone_migration", "true")], None),
+    ([("SWANS_Reserve_Zone_Enabled", "true"), ("SWANS_Reserve_Zone_Enabled", "true")], None),
+    ([("op_zone_migration", "true"), ("SWANS_Reserve_Zone_Enabled", "true")], 4),
+    ([("SWANS_Reserve_Zone_Enabled", "false"), ("op_zone_migration", "false")], 0),
+]):
+    ssd = ET.ElementTree(ET.fromstring(inline_xml))
+    device = ssd.find(".//Device_Parameter_Set")
+    for key in ("op_zone_migration", "SWANS_Reserve_Zone_Enabled"):
+        for node in device.findall(key):
+            device.remove(node)
+    for key, value in pairs:
+        ET.SubElement(device, key).text = value
+    ssd.write(folder / "ssd.xml")
+    if count is None:
+        invoke(folder, [], expected="Error in Device_Parameter_Set")
+    else:
+        root = invoke(folder, [])
+        assert next(root.iter("SWANS_Reserve_Zone_Count")).text == str(count)
+(folder / "ssd.xml").write_bytes(inline_xml)
+print("inline OP aliases: conflicts/duplicates rejected; matching aliases preserved")
 folder = prepare("preconditioned", precondition=True)
 # Trace preconditioning is unsupported by the existing FTL; use its supported
 # uniform synthetic workload to verify registration of initially mapped pages.
@@ -134,6 +193,8 @@ print("preconditioned: initial valid pages registered; hidden capacity excluded"
 folder = prepare("invalid-config")
 original = (folder / "swans.xml").read_text()
 cases = [
+    ("<SWANS_Parameter_Set><op_zone_migration>yes</op_zone_migration></SWANS_Parameter_Set>", "true or false"),
+    ("<SWANS_Parameter_Set><op_zone_migration>true</op_zone_migration><SWANS_Reserve_Zone_Enabled>false</SWANS_Reserve_Zone_Enabled></SWANS_Parameter_Set>", "Duplicate"),
     ("<SWANS_Parameter_Set><Unknown>1</Unknown></SWANS_Parameter_Set>", "Unknown"),
     ("<SWANS_Parameter_Set><SWANS_Enabled>true</SWANS_Enabled><SWANS_Enabled>false</SWANS_Enabled></SWANS_Parameter_Set>", "Duplicate"),
     ("<SWANS_Parameter_Set><SWANS_Migration_Slice_Sectors>-1</SWANS_Migration_Slice_Sectors></SWANS_Parameter_Set>", "nonnegative"),

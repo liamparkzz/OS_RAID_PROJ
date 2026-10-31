@@ -31,6 +31,7 @@ test: all build/wear_trigger_test build/zone_popularity_test build/reserve_excha
 	python3 tests/wear_trigger_smoke.py ./MQSim
 	python3 tests/reserve_exchange_smoke.py ./MQSim
 	python3 tests/advanced_swans_smoke.py ./MQSim
+	python3 tests/eol_modes_smoke.py ./MQSim
 	python3 tests/run_advanced_unit.py ./build/advanced_swans_test
 
 build/advanced_swans_test: tests/advanced_swans.cpp src/policy/wear_leveling_policy.cpp src/policy/zone_directory.cpp src/host/Trace_Pool.cpp $(wildcard src/policy/*.h) src/ssd/TEC_Wear.h src/host/Trace_Pool.h | checkdirs

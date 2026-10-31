@@ -291,7 +291,8 @@ int main(int argc, char* argv[])
 		if (trace_pool_requested && exec_params->SSD_Device_Configuration.Enabled_Preconditioning) {
 			throw std::invalid_argument("Trace_Directory requires Enabled_Preconditioning=false; trace-pool preconditioning is not supported");
 		}
-		if (eol_replay_requested && !exec_params->SSD_Device_Configuration.Bad_Block_Retirement_Enabled) {
+		if (eol_replay_requested && exec_params->SSD_Device_Configuration.End_of_Life_Mode == "OP_RATIO"
+			&& !exec_params->SSD_Device_Configuration.Bad_Block_Retirement_Enabled) {
 			PRINT_ERROR("Relay_Count=0 requires Bad_Block_Retirement_Enabled=true; otherwise EOL cannot be reached")
 		}
 		

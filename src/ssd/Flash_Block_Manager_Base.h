@@ -117,6 +117,7 @@ namespace SSD_Components
 		const TECWearSnapshot& Get_wear_snapshot() const;
 		// Also call after any future initial-wear injection.
 		void Invalidate_wear_snapshot() { tec_dirty = true; }
+		void Configure_end_of_life(const std::string& mode, double tec_threshold_percent);
 		uint64_t Get_bad_block_count() const { return bad_block_count; }
 		uint64_t Get_initial_op_block_budget() const { return original_op_block_budget; }
 		double Get_end_of_life_threshold() const { return end_of_life_threshold; }
@@ -139,6 +140,8 @@ namespace SSD_Components
 		std::string device_id;
 		double overprovisioning_ratio;
 		double end_of_life_threshold;
+		std::string end_of_life_mode = "OP_RATIO";
+		double end_of_life_tec_threshold_percent = 100.0;
 		bool bad_block_retirement_enabled;
 		bool eol_reached;
 		uint64_t total_block_count;

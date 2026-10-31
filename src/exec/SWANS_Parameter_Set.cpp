@@ -35,6 +35,9 @@ double real(const std::string& value)
 
 bool Set_swans_parameter(const std::string& key, const std::string& value, Device_Parameter_Set& p)
 {
+	// Public name for the hidden-zone, two-stage migration path. Keep the
+	// earlier reserve-zone option as an alias for existing experiment files.
+	if (key == "op_zone_migration") { p.SWANS_Reserve_Zone_Enabled = boolean(value); return true; }
 #define BOOL(field) if (key == #field) { p.field = boolean(value); return true; }
 #define UINT(field) if (key == #field) { p.field = number(value, std::numeric_limits<unsigned int>::max()); return true; }
 #define U64(field) if (key == #field) { p.field = number(value); return true; }
@@ -94,7 +97,7 @@ void Read_swans_configuration(const std::string& path, Device_Parameter_Set& par
 		if (node->type() != rapidxml::node_element || node->first_attribute()
 			|| (node->first_node() && node->first_node()->next_sibling())
 			|| (node->first_node() && node->first_node()->type() != rapidxml::node_data)
-			|| !seen.insert(key).second)
+			|| !seen.insert(key == "op_zone_migration" ? "SWANS_Reserve_Zone_Enabled" : key).second)
 			throw std::invalid_argument("Duplicate or malformed SWANS setting: " + key);
 		try {
 			if (!Set_swans_parameter(key, value, next)) throw std::invalid_argument("Unknown setting");

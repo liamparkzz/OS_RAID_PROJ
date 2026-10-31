@@ -28,9 +28,9 @@ MigrationTask plan(const ZoneDirectory& d, const MigrationOp& op) {
 	return task;
 }
 
-void exchange(unsigned mode) {
+void exchange(unsigned mode, bool half_decay) {
 	ZoneDirectory d; d.Initialize(4, 16, 16, 8, 128, true, 48);
-	d.Configure_popularity("LAST_EPOCH", 10);
+	d.Configure_popularity(half_decay ? "HALF_DECAY" : "LAST_EPOCH", 10);
 	std::map<Location, int> storage;
 	for (uint64_t z = 0; z < d.User_zone_count(); ++z) {
 		d.Observe_write(z, 0, 16, true);
@@ -47,6 +47,10 @@ void exchange(unsigned mode) {
 	bool rejected = false; try { ZoneResolveResult r; d.Resolve(128, r); } catch (const std::out_of_range&) { rejected = true; }
 	assert(rejected);
 	for (unsigned round = 0; round < 2; ++round) {
+		const double hot_heat = d.Zone_popularity(op.Hot_zone);
+		const double cold_heat = d.Zone_popularity(op.Cold_zone);
+		const double other_heat = d.Zone_popularity(1);
+		const auto hot_writes = d.Zone_written_sectors(op.Hot_zone);
 		auto task = plan(d, op);
 		auto hot = location(d, op.Hot_zone), cold = location(d, op.Cold_zone), spare = location(d, op.Reserve_zone);
 		auto young_spare = location(d, d.Find_reserve_zone_on_ssd(3));
@@ -92,7 +96,13 @@ void exchange(unsigned mode) {
 			assert(executor.Maybe_intercept(&unrelated, {1}, d, observe, now) == MigrationExecutor::InterceptResult::SUBMITTED);
 			executor.Poll(d, submit, discard, now);
 			if (executor.Has_inflight()) { assert(executor.Drain_replay_requests().empty()); assert(d.Migrating_zone_count() == 3); }
+			if (executor.Has_inflight()) assert(d.Zone_popularity(1) == other_heat);
 		}
+		const double factor = half_decay ? 0.5 : 1.0;
+		assert(d.Zone_popularity(op.Hot_zone) == hot_heat * factor);
+		assert(d.Zone_popularity(op.Cold_zone) == cold_heat * factor);
+		assert(d.Zone_popularity(1) == other_heat * factor);
+		assert(d.Zone_written_sectors(op.Hot_zone) == hot_writes);
 		assert(!executor.Has_inflight() && finished == 1 && io == 8 && discarded == 4);
 		assert(executor.Cold_stages_completed() == 1);
 		assert(storage.at(location(d, op.Hot_zone)) == h && storage.at(location(d, op.Cold_zone)) == c);
@@ -112,13 +122,100 @@ void exchange(unsigned mode) {
 	}
 }
 
+void policy_selection() {
+	WearSnapshot wear; wear.Values = {.9, .8, .3, .1};
+	for (const auto& metric : {"TEC", "BAD_BLOCK_COUNT", "WRITE_BYTES"}) {
+		for (const auto& trigger : {"DYNAMIC_WEAR", "IMBALANCE"}) {
+			for (const auto& selection : {"CUMULATIVE", "SSD_POPULARITY", "GLOBAL_POPULARITY"}) {
+				ZoneDirectory d; d.Initialize(4, 16, 16, 8, 128, true, 48);
+				d.Configure_popularity("LAST_EPOCH", 10);
+				for (uint64_t z = 0; z < d.User_zone_count(); ++z) d.Observe_write(z, 0, 8, true);
+				d.Observe_write(0, 0, 16, true);
+				d.Advance_popularity(10);
+				WearLevelingPolicy p; p.Initialize(4, 1, 2, 4, 1024);
+				p.Configure_metric(metric, trigger, selection, 1, 2);
+				p.Observe_host_write(0, 100 * 1024);
+				auto decision = p.Evaluate(d, wear);
+				assert(!decision.Migrations.empty());
+				std::vector<uint64_t> used;
+				for (const auto& op : decision.Migrations) {
+					assert(op.Reserve_zone != INVALID_ZONE_ID);
+					assert(d.Owner_ssd(op.Reserve_zone) == op.Hot_ssd);
+					for (auto z : {op.Hot_zone, op.Cold_zone, op.Reserve_zone}) {
+						assert(std::find(used.begin(), used.end(), z) == used.end());
+						used.push_back(z);
+					}
+				}
+				// Busy source spare must not be reused. Global selection can
+				// continue to another eligible source with its own spare.
+				d.Mark_migrating(8, true);
+				decision = p.Evaluate(d, wear);
+				if (std::string(selection) != "GLOBAL_POPULARITY") assert(decision.Migrations.empty());
+				else {
+					assert(!decision.Migrations.empty());
+					for (const auto& op : decision.Migrations) assert(op.Hot_ssd != 0 && op.Reserve_zone != 8);
+				}
+			}
+		}
+	}
+	ZoneDirectory d; d.Initialize(4, 16, 16, 8, 128);
+	for (uint64_t z = 0; z < d.User_zone_count(); ++z) d.Observe_write(z, 0, 8, true);
+	WearLevelingPolicy p; p.Initialize(4, 1e12, 0, 4, 1024);
+	assert(p.Evaluate(d, wear).Migrations.empty()); // No reserve configured.
+}
+
+void op_zone_migration_contract() {
+	// Four SSDs with exactly 100 backend zones each: expose 99, hide the last.
+	ZoneDirectory d; d.Initialize(4, 16, 16, 8, 4 * 99 * 16, true, 100 * 16);
+	assert(d.User_zone_count() == 396 && d.Zone_count() == 400);
+	assert(d.Exported_sectors() == 4 * 99 * 16);
+	for (unsigned ssd = 0; ssd < 4; ++ssd) {
+		auto op = d.Find_reserve_zone_on_ssd(ssd);
+		assert(op != INVALID_ZONE_ID && d.Is_empty(op));
+		assert(location(d, op) == Location(ssd, 99 * 16));
+	}
+	bool hidden = false;
+	try { ZoneResolveResult r; d.Resolve(d.Exported_sectors(), r); }
+	catch (const std::out_of_range&) { hidden = true; }
+	assert(hidden);
+	// Destination SSD 1 has one ordinary empty zone: prefer it to an exchange.
+	for (uint64_t z = 0; z < d.User_zone_count(); ++z)
+		if (z != 1) d.Observe_write(z, 0, 8, true);
+	d.Observe_write(0, 0, 8, true);
+	WearSnapshot wear; wear.Values = {.1, .9, .3, .2};
+	WearLevelingPolicy writes; writes.Initialize(4, 5, 32, 1, 1);
+	writes.Configure_metric("WRITE_BYTES", "IMBALANCE", "SSD_POPULARITY", 0, 0);
+	// Migration writes count too: SSD 0 has the most total writes despite
+	// SSD 2 having the most host-only writes. TEC ranks SSD 1 as oldest.
+	writes.Observe_host_write(2, 200);
+	writes.Observe_completed_migration_write(0, 1000);
+	writes.Observe_host_write(3, 3);
+	auto empty = writes.Evaluate(d, wear).Migrations.at(0);
+	assert(empty.Hot_ssd == 0 && empty.Cold_ssd == 1);
+	assert(empty.Cold_zone == 1 && empty.Reserve_zone == INVALID_ZONE_ID);
+	d.Observe_write(1, 0, 8, true);
+	auto exchange = writes.Evaluate(d, wear).Migrations.at(0);
+	assert(exchange.Hot_zone == 0 && exchange.Cold_zone == 1);
+	assert(exchange.Reserve_zone == d.Find_reserve_zone_on_ssd(0));
+	WearLevelingPolicy tec; tec.Initialize(4, 5, 10, 1, 1);
+	tec.Configure_metric("TEC", "DYNAMIC_WEAR", "SSD_POPULARITY", 5, 10);
+	auto tec_exchange = tec.Evaluate(d, wear).Migrations.at(0);
+	assert(tec_exchange.Hot_ssd == 1 && tec_exchange.Cold_ssd == 0);
+	assert(tec_exchange.Hot_zone == 1 && tec_exchange.Cold_zone == 4);
+	assert(tec_exchange.Reserve_zone == d.Find_reserve_zone_on_ssd(1));
+}
+
 int main() {
-	for (unsigned mode = 0; mode < 4; ++mode) exchange(mode);
+	op_zone_migration_contract();
+	policy_selection();
+	for (unsigned mode = 0; mode < 4; ++mode) { exchange(mode, false); exchange(mode, true); }
 	ZoneDirectory d; d.Initialize(4, 16, 16, 8, 128, true, 48);
 	d.Observe_write(0, 0, 8, true); d.Configure_popularity("LAST_EPOCH", 10); d.Advance_popularity(10);
 	WearLevelingPolicy p; p.Initialize(4, 1e12, 0, 1, 1024); WearSnapshot w; w.Values = {.9, .5, .3, .1};
 	auto op = p.Evaluate(d, w).Migrations.at(0); assert(op.Reserve_zone == INVALID_ZONE_ID);
 	MigrationExecutor executor; executor.Start({plan(d, op)}, d);
+	const auto heat_before_abort = d.Zone_popularity(0);
 	auto abort = executor.Abort_all(d); assert(abort.Task_count == 1 && d.Migrating_zone_count() == 2);
+	assert(d.Zone_popularity(0) == heat_before_abort);
 	std::cout << "reserve exchange: two stages, rotating spares, data, pause/resume, replay, discard retries, abort passed\n";
 }

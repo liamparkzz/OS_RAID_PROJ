@@ -53,11 +53,12 @@ public:
 	uint64_t Zone_write_count(uint64_t zone_id) const;
 	uint64_t Total_zone_write_count() const;
 	uint64_t Zone_written_sectors(uint64_t zone_id) const;
-	// Popularity is host-write sectors per fixed time window, independent of policy state.
+	// HALF_DECAY accumulates live writes and halves only after a completed migration.
 	void Configure_popularity(const std::string& mode, sim_time_type period);
 	void Advance_popularity(sim_time_type now);
+	void On_migration_completed();
 	const std::string& Popularity_mode() const { return popularity_mode; }
-	sim_time_type Popularity_period() const { return popularity_period; }
+	sim_time_type Popularity_period() const { return popularity_mode == "HALF_DECAY" ? 0 : popularity_period; }
 	double Zone_popularity(uint64_t zone_id) const;
 	uint64_t Zone_valid_sectors(uint64_t zone_id) const;
 	double Zone_valid_ratio(uint64_t zone_id) const;

@@ -2,13 +2,25 @@
 
 Selection used by both empty-destination migration and reserve exchange:
 
-- `SWANS_Zone_Popularity_Mode=HALF_DECAY` (default): at each window boundary,
-  `P_new = 0.5 * P_old + host_write_sectors_in_window`.
+- `SWANS_Zone_Popularity_Mode=HALF_DECAY` (default): each host write immediately
+  adds its sector count to P. After each successfully completed migration task,
+  every zone's P is multiplied by 0.5. Time passing alone never changes P.
+  A two-stage reserve exchange counts once, after both stages and source discard
+  complete. Pauses, failed discard retries and EOL aborts do not halve P.
+  Concurrent tasks each halve P when they finish; two completions apply 0.5 twice.
+  Deferred host writes replayed after completion count at full weight when observed.
+  Lifetime write counters and cumulative zone selection are not halved.
+  The RAID controller retains this state in its ZoneDirectory. For successive
+  per-zone write amounts A, B, C, D separated by three completed migrations,
+  the current score is `A/8 + B/4 + C/2 + D`. It is never replaced with only
+  the latest interval; D accumulates on top of the retained older history.
 - `LAST_EPOCH`: `P_new = host_write_sectors_in_window`.
-- `SWANS_Zone_Popularity_Period` is a fixed duration in nanoseconds; zero uses
-  `SWANS_Epoch_Default`. It does not change with NORMAL/REDIRECT/MIGRATION state.
-- Selection uses the latest completed window. Updates happen lazily before host
-  write accounting and policy evaluation. Idle windows still age popularity.
+- `SWANS_Zone_Popularity_Period` applies only to LAST_EPOCH, in nanoseconds;
+  zero uses `SWANS_Epoch_Default`. HALF_DECAY ignores legacy period settings,
+  including 40 seconds. Runtime statistics report its effective period as 0 and
+  update rule as `LIVE_WRITES_HALF_ALL_ZONES_PER_COMPLETED_MIGRATION`.
+- HALF_DECAY selection uses live accumulated heat. LAST_EPOCH selection uses the
+  latest completed time window, including empty idle windows.
 - Host overwrites count again for popularity; migration copies do not.
 - Source: maximum popularity on the oldest SSD. Equal-popularity ties prefer
   fewer copy sectors, then lowest logical zone ID. A cold-zone selector uses the

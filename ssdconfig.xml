@@ -32,6 +32,8 @@
 		<Overprovisioning_Ratio>0.20</Overprovisioning_Ratio>
 		<Bad_Block_Retirement_Enabled>true</Bad_Block_Retirement_Enabled>
 		<End_of_Life_Threshold>0.05</End_of_Life_Threshold>
+		<End_of_Life_Mode>OP_RATIO</End_of_Life_Mode>
+		<End_of_Life_TEC_Threshold_Percent>100</End_of_Life_TEC_Threshold_Percent>
 		<GC_Exec_Threshold>0.10000</GC_Exec_Threshold>
 		<GC_Block_Selection_Policy>GREEDY</GC_Block_Selection_Policy>
 		<Use_Copyback_for_GC>false</Use_Copyback_for_GC>

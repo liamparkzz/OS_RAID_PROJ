@@ -43,6 +43,8 @@ public:
 	double Overprovisioning_Ratio;//The ratio of spare space with respect to the whole available storage space of SSD
 	bool Bad_Block_Retirement_Enabled;//Retire blocks permanently after they reach Block_PE_Cycles_Limit
 	double End_of_Life_Threshold;//Remaining OP ratio at/below which the SSD reaches EOL
+	std::string End_of_Life_Mode = "OP_RATIO";
+	double End_of_Life_TEC_Threshold_Percent = 100.0;
 	double GC_Exec_Threshold;//The threshold for the ratio of free pages that used to trigger GC
 	SSD_Components::GC_Block_Selection_Policy_Type GC_Block_Selection_Policy;
 	bool Use_Copyback_for_GC;
@@ -63,7 +65,7 @@ public:
 	unsigned int SSD_Count; // Number of SSDs in the virtual RAID device
 	unsigned int Stripe_Unit_LBA; // Stripe unit size in LBA units
 	bool SWANS_Enabled;
-	bool SWANS_Reserve_Zone_Enabled = false;
+	bool SWANS_Reserve_Zone_Enabled = false; // XML: op_zone_migration (legacy name remains supported)
 	sim_time_type SWANS_Migration_Slice_Time = 0;
 	uint64_t SWANS_Migration_Slice_Sectors = 0;
 	sim_time_type SWANS_Migration_Pause_Duration = 1000000;
@@ -80,7 +82,7 @@ public:
 	double SWANS_TEC_TH_Precautionary_PctPoint = -1;
 	double SWANS_TEC_TH_Critical_PctPoint = -1;
 	std::string SWANS_Zone_Popularity_Mode = "HALF_DECAY";
-	sim_time_type SWANS_Zone_Popularity_Period = 40000000000ULL; // ns; default is fixed 40 seconds; 0 uses the default policy epoch
+	sim_time_type SWANS_Zone_Popularity_Period = 40000000000ULL; // LAST_EPOCH only; HALF_DECAY ignores time periods
 	// Write imbalance threshold for redirect; critical is retained only for XML compatibility.
 	double SWANS_TH_Precautionary;
 	double SWANS_TH_Critical;

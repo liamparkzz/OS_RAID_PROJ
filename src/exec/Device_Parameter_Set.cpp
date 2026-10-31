@@ -1,6 +1,8 @@
 #include "Device_Parameter_Set.h"
 #include "SWANS_Parameter_Set.h"
 #include <algorithm>
+#include <cmath>
+#include <set>
 Device_Parameter_Set::Device_Parameter_Set()
 	: Seed(123),
 	  Enabled_Preconditioning(true),
@@ -303,6 +305,8 @@ void Device_Parameter_Set::XML_serialize(Utils::XmlWriter& xmlwriter)
 	xmlwriter.Write_attribute_string(attr, val);
 
 	attr = "End_of_Life_Threshold";
+	xmlwriter.Write_attribute_string("End_of_Life_Mode", End_of_Life_Mode);
+	xmlwriter.Write_attribute_string("End_of_Life_TEC_Threshold_Percent", std::to_string(End_of_Life_TEC_Threshold_Percent));
 	val = std::to_string(End_of_Life_Threshold);
 	xmlwriter.Write_attribute_string(attr, val);
 
@@ -443,7 +447,7 @@ void Device_Parameter_Set::XML_serialize(Utils::XmlWriter& xmlwriter)
 
 	xmlwriter.Write_attribute_string("SWANS_Zone_Popularity_Mode", SWANS_Zone_Popularity_Mode);
 	xmlwriter.Write_attribute_string("SWANS_Zone_Popularity_Period", std::to_string(SWANS_Zone_Popularity_Period));
-	xmlwriter.Write_attribute_string("SWANS_Reserve_Zone_Enabled", SWANS_Reserve_Zone_Enabled ? "true" : "false");
+	xmlwriter.Write_attribute_string("op_zone_migration", SWANS_Reserve_Zone_Enabled ? "true" : "false");
 	xmlwriter.Write_attribute_string("SWANS_Migration_Slice_Time", std::to_string(SWANS_Migration_Slice_Time));
 	xmlwriter.Write_attribute_string("SWANS_Migration_Slice_Sectors", std::to_string(SWANS_Migration_Slice_Sectors));
 	xmlwriter.Write_attribute_string("SWANS_Migration_Pause_Duration", std::to_string(SWANS_Migration_Pause_Duration));
@@ -486,6 +490,7 @@ void Device_Parameter_Set::XML_deserialize(rapidxml::xml_node<> *node)
 {
 	try
 	{
+		std::set<std::string> reserve_option_names;
 		for (auto param = node->first_node(); param; param = param->next_sibling()) {
 			if (strcmp(param->name(), "Seed") == 0) {
 				std::string val = param->value();
@@ -671,6 +676,18 @@ void Device_Parameter_Set::XML_deserialize(rapidxml::xml_node<> *node)
 				} else {
 					PRINT_ERROR("Bad_Block_Retirement_Enabled must be true or false")
 				}
+			} else if (strcmp(param->name(), "End_of_Life_Mode") == 0) {
+				End_of_Life_Mode = param->value();
+			} else if (strcmp(param->name(), "End_of_Life_TEC_Threshold_Percent") == 0) {
+				const std::string value = param->value();
+				size_t end = 0;
+				const double threshold = std::stod(value, &end);
+				if (value.find_first_not_of(" \t\r\n\f\v", end) != std::string::npos)
+					throw std::invalid_argument("Invalid End_of_Life_TEC_Threshold_Percent");
+				if (!std::isfinite(threshold) || threshold <= 0 || threshold > 100) {
+					PRINT_ERROR("End_of_Life_TEC_Threshold_Percent must be in (0, 100]")
+				}
+				End_of_Life_TEC_Threshold_Percent = threshold;
 			} else if (strcmp(param->name(), "End_of_Life_Threshold") == 0) {
 				std::string val = param->value();
 				End_of_Life_Threshold = std::stod(val);
@@ -753,8 +770,16 @@ void Device_Parameter_Set::XML_deserialize(rapidxml::xml_node<> *node)
 			} else if (strcmp(param->name(), "Stripe_Unit_LBA") == 0) {
 				std::string val = param->value();
 				Stripe_Unit_LBA = std::stoul(val);
-			} else if (std::string(param->name()) == "SWANS_Reserve_Zone_Enabled"
-				|| std::string(param->name()) == "SWANS_Migration_Slice_Time"
+			} else if (std::string(param->name()) == "op_zone_migration"
+				|| std::string(param->name()) == "SWANS_Reserve_Zone_Enabled") {
+				if (!reserve_option_names.insert(param->name()).second)
+					throw std::invalid_argument("Duplicate OP zone migration option");
+				const bool previous = SWANS_Reserve_Zone_Enabled;
+				Set_swans_parameter(param->name(), param->value(), *this);
+				// Older serialized settings contain both aliases with the same value.
+				if (reserve_option_names.size() > 1 && previous != SWANS_Reserve_Zone_Enabled)
+					throw std::invalid_argument("Conflicting OP zone migration aliases");
+			} else if (std::string(param->name()) == "SWANS_Migration_Slice_Time"
 				|| std::string(param->name()) == "SWANS_Migration_Slice_Sectors"
 				|| std::string(param->name()) == "SWANS_Migration_Pause_Duration"
 				|| std::string(param->name()) == "SWANS_Migration_Pause_On_Read") {
@@ -840,7 +865,7 @@ void Device_Parameter_Set::XML_deserialize(rapidxml::xml_node<> *node)
 		if (SWANS_Migration_Working_Queue_Limit == 0 || SWANS_Buffered_Write_Completion_Mode != "DEFERRED") {
 			throw std::invalid_argument("Working queue limit must be positive; only DEFERRED completion is supported");
 		}
-		if (End_of_Life_Threshold < 0.0 || End_of_Life_Threshold >= Overprovisioning_Ratio) {
+		if (End_of_Life_Mode == "OP_RATIO" && (End_of_Life_Threshold < 0.0 || End_of_Life_Threshold >= Overprovisioning_Ratio)) {
 			PRINT_ERROR("End_of_Life_Threshold must be non-negative and smaller than Overprovisioning_Ratio")
 		}
 		if (Bad_Block_Retirement_Enabled && Flash_Parameters.Block_PE_Cycles_Limit == 0) {

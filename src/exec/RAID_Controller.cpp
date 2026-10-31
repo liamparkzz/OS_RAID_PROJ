@@ -1171,6 +1171,8 @@ void RAID_Controller::Report_results_in_XML(std::string name_prefix, Utils::XmlW
 	xmlwriter.Write_attribute_string("SWANS_Zone_Size_LBA", std::to_string(swans_zone_size_lba));
 	xmlwriter.Write_attribute_string("SWANS_Zone_Popularity_Mode", zone_directory.Popularity_mode());
 	xmlwriter.Write_attribute_string("SWANS_Zone_Popularity_Period", std::to_string(zone_directory.Popularity_period()));
+	xmlwriter.Write_attribute_string("SWANS_Zone_Popularity_Update", zone_directory.Popularity_mode() == "HALF_DECAY"
+		? "LIVE_WRITES_HALF_ALL_ZONES_PER_COMPLETED_MIGRATION" : "LAST_TIME_WINDOW");
 	xmlwriter.Write_attribute_string("SWANS_Zone_Selection", wear_leveling_policy.Selection());
 	xmlwriter.Write_attribute_string("SWANS_Copy_Unit_LBA", std::to_string(zone_directory.Block_unit_lba()));
 	xmlwriter.Write_attribute_string("SWANS_Preconditioned_Valid_Sectors", std::to_string(preconditioned_valid_sectors));
@@ -1392,7 +1394,7 @@ void RAID_Controller::Report_results_in_XML(std::string name_prefix, Utils::XmlW
 		xmlwriter.Write_attribute_string("Start_Time", std::to_string(record.Start_time));
 		xmlwriter.Write_attribute_string("End_Time", std::to_string(record.End_time));
 		xmlwriter.Write_attribute_string("Status", record.Status);
-		xmlwriter.Write_attribute_string("Mode", record.Reserve_zone == RAID_Policy::INVALID_ZONE_ID ? "EMPTY_DESTINATION" : "RESERVE_EXCHANGE");
+		xmlwriter.Write_attribute_string("Mode", record.Reserve_zone == RAID_Policy::INVALID_ZONE_ID ? "EMPTY_DESTINATION" : "op_zone_migration");
 		xmlwriter.Write_attribute_string("Reserve_Zone", record.Reserve_zone == RAID_Policy::INVALID_ZONE_ID ? "NONE" : std::to_string(record.Reserve_zone));
 		xmlwriter.Write_attribute_string("Cold_Copy_Sectors", std::to_string(record.Cold_copy_sectors));
 		xmlwriter.Write_attribute_string("Duration_ns", std::to_string(record.End_time >= record.Start_time ? record.End_time - record.Start_time : 0));

@@ -590,6 +590,9 @@ void MigrationExecutor::Poll(ZoneDirectory& directory,
 					if (!discarded) break; // retry invalidation; never recycle a still-live source
 					if (!Drain_task(task, directory)) { advance_without_io = true; break; }
 					task.State = TaskState::DONE;
+					// Once per whole task, after both reserve-exchange stages and
+					// successful source invalidation. Pauses/aborts never age heat.
+					directory.On_migration_completed();
 					if (Task_finished) Task_finished(task.Original_op.Hot_zone, false);
 					break;
 				}

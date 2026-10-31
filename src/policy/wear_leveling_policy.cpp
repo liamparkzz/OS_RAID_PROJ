@@ -265,7 +265,21 @@ PolicyDecision WearLevelingPolicy::Evaluate(const ZoneDirectory& directory, cons
 			}
 		}
 		uint64_t cold_zone = directory.Find_empty_zone_on_ssd(cold_ssd, reserved);
+		uint64_t reserve_zone = INVALID_ZONE_ID;
+		if (cold_zone == INVALID_ZONE_ID) {
+			// op_zone_migration: only when the selected destination has no
+			// available ordinary empty zone. Cold -> source OP, then hot ->
+			// freed cold location; the former hot location becomes source OP.
+			reserve_zone = directory.Find_reserve_zone_on_ssd(hot_ssd, reserved);
+			if (reserve_zone != INVALID_ZONE_ID)
+				cold_zone = directory.Find_coldest_used_zone_on_ssd(cold_ssd, reserved);
+		}
 		if (hot_zone == INVALID_ZONE_ID || cold_zone == INVALID_ZONE_ID || hot_zone == cold_zone) {
+			// A global candidate on another SSD may have its own free spare.
+			if (selection == "GLOBAL_POPULARITY") {
+				reserved.push_back(hot_zone);
+				continue;
+			}
 			break;
 		}
 
@@ -274,9 +288,11 @@ PolicyDecision WearLevelingPolicy::Evaluate(const ZoneDirectory& directory, cons
 		op.Cold_zone = cold_zone;
 		op.Hot_ssd = hot_ssd;
 		op.Cold_ssd = cold_ssd;
+		op.Reserve_zone = reserve_zone;
 		decision.Migrations.push_back(op);
 		reserved.push_back(hot_zone);
 		reserved.push_back(cold_zone);
+		if (reserve_zone != INVALID_ZONE_ID) reserved.push_back(reserve_zone);
 	}
 	// No movable source or free destination: retain write-based placement.
 	if (decision.Migrations.empty()) {

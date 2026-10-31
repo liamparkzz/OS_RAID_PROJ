@@ -30,6 +30,8 @@ int main(int argc, char** argv) {
     ZoneDirectory d; d.Initialize(4, 8, 32, 8, 512); d.Configure_popularity("HALF_DECAY", 40000000000ULL);
     d.Observe_write(0, 0, 32, true); d.Observe_write(4, 0, 16, true); d.Observe_write(1, 0, 8, true);
     d.Advance_popularity(40000000000ULL);
+    assert(d.Zone_popularity(0) == 32 && d.Zone_popularity(4) == 16);
+    d.On_migration_completed();
     d.Observe_write(4, 0, 12, true); d.Advance_popularity(80000000000ULL);
     assert(d.Zone_popularity(0) == 16 && d.Zone_popularity(4) == 20);
     assert(d.Find_migration_zone(0, false, true, {}) == 0);

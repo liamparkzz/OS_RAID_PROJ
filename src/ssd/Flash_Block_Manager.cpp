@@ -178,6 +178,8 @@ namespace SSD_Components
 		}
 		plane_record->Add_to_free_block_pool(block, gc_and_wl_unit->Use_dynamic_wearleveling());
 		plane_record->Check_bookkeeping_correctness(block_address);
+		// TEC can cross its threshold before any block retires.
+		Check_end_of_life();
 	}
 
 	inline unsigned int Flash_Block_Manager::Get_pool_size(const NVM::FlashMemory::Physical_Page_Address& plane_address)

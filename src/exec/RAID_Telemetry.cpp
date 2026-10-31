@@ -91,6 +91,10 @@ void RAID_Device::Write_snapshot_XML(const std::string& tag, const Snapshot& s, 
 {
     w.Write_open_tag(tag);
     w.Write_attribute_string("Time_ns", std::to_string(s.Time));
+    w.Write_attribute_string("End_of_Life_Mode", ssd_configs[0].End_of_Life_Mode);
+    w.Write_attribute_string("End_of_Life_Threshold_Unit", ssd_configs[0].End_of_Life_Mode == "TEC" ? "percent" : "remaining_op_ratio");
+    w.Write_attribute_string("End_of_Life_Active_Threshold", std::to_string(ssd_configs[0].End_of_Life_Mode == "TEC"
+        ? ssd_configs[0].End_of_Life_TEC_Threshold_Percent : ssd_configs[0].End_of_Life_Threshold));
     w.Write_attribute_string("Completed_Host_Requests", std::to_string(s.Host.Completed_requests));
     w.Write_attribute_string("Completed_Host_Write_Requests", std::to_string(s.Host.Completed_write_requests));
     w.Write_attribute_string("Completed_Host_Write_Bytes", std::to_string(s.Host.Completed_write_bytes));

@@ -267,7 +267,8 @@ void ZoneDirectory::Observe_write(stream_id_type stream_id, uint64_t zone_id, ui
 	ZoneEntry& zone = zones[static_cast<size_t>(zone_id)];
 	if (count_host_request_zone_touch) zone.Number_of_writes++;
 	zone.Written_sectors += write_sectors;
-	zone.Epoch_write_sectors += write_sectors;
+	if (popularity_mode == "HALF_DECAY") zone.Popularity += write_sectors;
+	else zone.Epoch_write_sectors += write_sectors;
 }
 
 void ZoneDirectory::Observe_data(stream_id_type stream_id, uint64_t zone_id, uint64_t zone_lba_offset,
@@ -381,8 +382,8 @@ bool ZoneDirectory::Is_reserved(uint64_t zone_id, const std::vector<uint64_t>& r
 
 void ZoneDirectory::Configure_popularity(const std::string& mode, sim_time_type period)
 {
-	if ((mode != "HALF_DECAY" && mode != "LAST_EPOCH") || period == 0)
-		throw std::invalid_argument("Popularity requires HALF_DECAY or LAST_EPOCH and a positive period");
+	if ((mode != "HALF_DECAY" && mode != "LAST_EPOCH") || (mode == "LAST_EPOCH" && period == 0))
+		throw std::invalid_argument("Popularity requires HALF_DECAY or LAST_EPOCH; LAST_EPOCH requires a positive period");
 	popularity_mode = mode;
 	popularity_period = period;
 	popularity_epoch = 0;
@@ -391,19 +392,21 @@ void ZoneDirectory::Configure_popularity(const std::string& mode, sim_time_type 
 
 void ZoneDirectory::Advance_popularity(sim_time_type now)
 {
+	if (popularity_mode == "HALF_DECAY") return;
 	const uint64_t epoch = now / popularity_period;
 	if (epoch <= popularity_epoch) return;
 	const uint64_t elapsed = epoch - popularity_epoch;
 	for (auto& zone : zones) {
-		if (popularity_mode == "LAST_EPOCH") {
-			zone.Popularity = elapsed == 1 ? static_cast<double>(zone.Epoch_write_sectors) : 0.0;
-		} else {
-			zone.Popularity = (zone.Popularity * 0.5 + static_cast<double>(zone.Epoch_write_sectors))
-				* std::pow(0.5, static_cast<double>(elapsed - 1));
-		}
+		zone.Popularity = elapsed == 1 ? static_cast<double>(zone.Epoch_write_sectors) : 0.0;
 		zone.Epoch_write_sectors = 0;
 	}
 	popularity_epoch = epoch;
+}
+
+void ZoneDirectory::On_migration_completed()
+{
+	if (popularity_mode != "HALF_DECAY") return;
+	for (auto& zone : zones) zone.Popularity *= 0.5;
 }
 
 double ZoneDirectory::Zone_popularity(uint64_t zone_id) const

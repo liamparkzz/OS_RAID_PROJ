@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <SWANS_Parameter_Set>
   <SWANS_Enabled>true</SWANS_Enabled>
-  <SWANS_Reserve_Zone_Enabled>true</SWANS_Reserve_Zone_Enabled>
+  <op_zone_migration>true</op_zone_migration>
   <SWANS_Zone_Size_LBA>0</SWANS_Zone_Size_LBA>
   <SWANS_Wear_Metric>BAD_BLOCK_COUNT</SWANS_Wear_Metric>
   <SWANS_Migration_Trigger>DYNAMIC_WEAR</SWANS_Migration_Trigger>
